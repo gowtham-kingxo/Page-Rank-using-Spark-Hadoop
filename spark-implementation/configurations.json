@@ -1,0 +1,9 @@
+[
+  {
+    "Classification": "spark-defaults",
+    "Properties": {
+      "spark.driver.memoryOverhead": "1024",
+      "spark.executor.memoryOverhead": "1024"
+    }
+  }
+]

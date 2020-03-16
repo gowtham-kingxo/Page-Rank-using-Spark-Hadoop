@@ -1,0 +1,32 @@
+# Project files
+.idea
+.project
+.vimrc
+.vscode
+.vs
+
+# Logs
+logs.txt
+*.log
+
+# Temp folder
+temp/
+
+# Maven files
+*.iml
+target/
+
+.DS_Store
+Thumbs.db
+
+# input
+input/
+
+# output
+output/
+
+# ignore jars
+*.jar
+
+# input edges.csv
+edges.csv
