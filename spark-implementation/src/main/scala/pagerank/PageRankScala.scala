@@ -40,7 +40,7 @@ object PageRankScala {
     val totalVertices = k * k
     var ranks = scala.collection.mutable.ArrayBuffer.empty[(Int, Double)]
     val initialPageRankValue: Double = (1.0 / totalVertices)
-    val alpha: Double = 0.2
+    val alpha: Double = 0.15
     val randomSurferProbabilityPerVertex: Double = alpha / totalVertices
     val oneMinusAlpha: Double = 1 - alpha
 
@@ -72,22 +72,22 @@ object PageRankScala {
 
           case _ => {
             // Page rank formula: p' = α * 1/|G| + (1 − α) * (m /|G| + p)
-//            val randomSurferProbability: Double = alpha * (1 / totalVertices)
-//            val pageRankProbability: Double = (1 - alpha) * (pageRankValue + probabilityFromDanglingNodesPerVertex)
-//
-//            val newPageRankValue: Double = randomSurferProbability + pageRankProbability
+            val randomSurferProbability: Double = alpha * (1.0 / totalVertices)
+            val pageRankProbability: Double = (1 - alpha) * (pageRankValue + probabilityFromDanglingNodesPerVertex)
+
+            val newPageRankValue: Double = randomSurferProbability + pageRankProbability
 
             // Calculating page rank without alpha
-             val newPageRankValue = pageRankValue + probabilityFromDanglingNodesPerVertex
+            // val newPageRankValue = pageRankValue + probabilityFromDanglingNodesPerVertex
 
             (vertexId, newPageRankValue)
           }
         }
       })
-
-      ranksRDD.collect().foreach(x => println(x))
-      val sumProbability = ranksRDD.map(_._2).sum()
-      println("Sum: " + sumProbability)
     }
+
+    ranksRDD.collect().foreach(x => println(x))
+    val sumProbability = ranksRDD.map(_._2).sum()
+    println("Sum: " + sumProbability)
   }
 }
