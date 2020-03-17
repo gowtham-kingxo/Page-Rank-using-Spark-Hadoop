@@ -26,57 +26,66 @@ object PageRankScala {
       // Since vertices with no incoming edges would not be included in the joined RDD
       noIncomingEdgeVertices = noIncomingEdgeVertices :+ (vertexIdStart, 0.0)
 
-      for (j <- vertexIdStart until  vertexIdEnd) {
-        graph = graph :+ (j, j+1)
+      for (j <- vertexIdStart until vertexIdEnd) {
+        graph = graph :+ (j, j + 1)
       }
 
-      graph = graph :+ (vertexIdEnd , 0)
+      graph = graph :+ (vertexIdEnd, 0)
     }
 
     val graphRDD = sc.parallelize(graph.toSeq)
 
     val noIncomingEdgeVerticesRDD = sc.parallelize(noIncomingEdgeVertices.toSeq)
 
-    val kSquare = k * k
+    val totalVertices = k * k
     var ranks = scala.collection.mutable.ArrayBuffer.empty[(Int, Double)]
-    val initialPageRankValue: Double = (1.0 / kSquare)
+    val initialPageRankValue: Double = (1.0 / totalVertices)
+    val alpha: Double = 0.15
+    val randomSurferProbabilityPerVertex: Double = alpha / totalVertices
+    val oneMinusAlpha: Double = 1 - alpha
 
     // Initialize vertices with initial page rank values
     ranks = ranks :+ (0, 0.0)
-    for (i <- 1 to kSquare) {
+    for (i <- 1 to totalVertices) {
       ranks = ranks :+ (i, initialPageRankValue)
     }
 
     var ranksRDD = sc.parallelize(ranks.toSeq)
 
 
-      val joinedData = graphRDD.join(ranksRDD)
-      val joinedRowValues = joinedData.map(row => row._2)
+    val joinedData = graphRDD.join(ranksRDD)
+    val joinedRowValues = joinedData.map(row => row._2)
 
-      ranksRDD = joinedRowValues.reduceByKey(_ + _)
-      ranksRDD = ranksRDD.union(noIncomingEdgeVerticesRDD)
+    ranksRDD = joinedRowValues.reduceByKey(_ + _)
+    ranksRDD = ranksRDD.union(noIncomingEdgeVerticesRDD)
 
-//      val sumProbability = ranksRDD.map(_._2).sum()
-      val probabilityFromDanglingNodes: Double = ranksRDD.lookup(0).head
-      val probabilityFromDanglingNodesPerVertex: Double = probabilityFromDanglingNodes / kSquare
+    val probabilityFromDanglingNodes: Double = ranksRDD.lookup(0).head
+    val probabilityFromDanglingNodesPerVertex: Double = probabilityFromDanglingNodes / totalVertices
 
-      ranksRDD = ranksRDD.map(vertex => {
-        val vertexId = vertex._1
-        val pageRankValue = vertex._2
+    ranksRDD = ranksRDD.map(vertex => {
+      val vertexId = vertex._1
+      val pageRankValue = vertex._2
 
-        vertexId match  {
-          case 0 => (vertexId, 0.0)
+      vertexId match {
+        case 0 => (vertexId, 0.0)
 
-          case _ => {
-            val newPageRankValue = pageRankValue + probabilityFromDanglingNodesPerVertex
-            (vertexId, newPageRankValue)
-          }
+        case _ => {
+          // Page rank formula: p' = α * 1/|G| + (1 − α) * (m /|G| + p)
+//          val randomSurferProbability = alpha * (1 / totalVertices)
+//          val pageRankProbability = (1 - alpha) * (pageRankValue + probabilityFromDanglingNodesPerVertex)
+//
+//          val newPageRankValue = randomSurferProbability + pageRankProbability
+
+          val newPageRankValue = pageRankValue + probabilityFromDanglingNodesPerVertex
+
+          (vertexId, newPageRankValue)
         }
-      })
+      }
+    })
 
-//    ranksRDD.collect().foreach(x => println(x))
-//    val sumProbability = ranksRDD.map(_._2).sum()
-//    println("Sum: " + sumProbability)
+    ranksRDD.collect().foreach(x => println(x))
+    val sumProbability = ranksRDD.map(_._2).sum()
+    println("Sum: " + sumProbability)
 
   }
 }
