@@ -33,16 +33,14 @@ object PageRankScala {
       graph = graph :+ (vertexIdEnd, 0)
     }
 
-    val graphRDD = sc.parallelize(graph.toSeq)
+    val graphRDD = sc.parallelize(graph.toSeq).cache()
 
-    val noIncomingEdgeVerticesRDD = sc.parallelize(noIncomingEdgeVertices.toSeq)
+    val noIncomingEdgeVerticesRDD = sc.parallelize(noIncomingEdgeVertices.toSeq).cache()
 
     val totalVertices = k * k
     var ranks = scala.collection.mutable.ArrayBuffer.empty[(Int, Double)]
     val initialPageRankValue: Double = (1.0 / totalVertices)
     val alpha: Double = 0.15
-    val randomSurferProbabilityPerVertex: Double = alpha / totalVertices
-    val oneMinusAlpha: Double = 1 - alpha
 
     // Initialize vertices with initial page rank values
     ranks = ranks :+ (0, 0.0)
@@ -83,9 +81,11 @@ object PageRankScala {
             (vertexId, newPageRankValue)
           }
         }
-      })
+      }).cache()
     }
 
+
+    println("DebugString: " + ranksRDD.toDebugString)
     ranksRDD.collect().foreach(x => println(x))
     val sumProbability = ranksRDD.map(_._2).sum()
     println("Sum: " + sumProbability)

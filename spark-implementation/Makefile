@@ -11,7 +11,7 @@ job.name=pagerank.PageRankScala
 local.master=local[4]
 local.input=input
 local.output=output
-local.k_value=100
+local.k_value=3
 # Pseudo-Cluster Execution
 hdfs.user.name=gowthamgenupur
 hdfs.input=input
