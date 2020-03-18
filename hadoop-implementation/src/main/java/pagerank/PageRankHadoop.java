@@ -1,29 +1,43 @@
 package pagerank;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
+import org.apache.log4j.Level;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 import twitter.followers.ReduceSideJoinFollowerTriangles;
+import org.apache.hadoop.mapreduce.*;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 
 public class PageRankHadoop extends Configured implements Tool {
     private static final Logger logger = LogManager.getLogger(PageRankHadoop.class);
+    private static final int k = 3;
+    private static final double alpha = 0.15;
 
-    enum DANGLING_NODE_PROBABILITY_DISTRIBUTION {
-        DANGLING_NODE_PROBABILITY_ACCUMULATOR;
+    enum DANGLING_VERTICES_PROBABILITY_DISTRIBUTION {
+        DANGLING_VERTICES_PROBABILITY_ACCUMULATOR;
     }
 
-    private class Vertex {
+    private static class Vertex {
         private double pageRankValue;
         private String id;
         private ArrayList<String> adjacencyList;
 
         // Assigns the values from the serialized string
-        Vertex (String serializedValue) {
+        Vertex(String serializedValue) {
             String[] parts = serializedValue.split(":");
             this.id = parts[0];
             this.pageRankValue = Double.parseDouble(parts[2]);
@@ -60,8 +74,143 @@ public class PageRankHadoop extends Configured implements Tool {
         }
     }
 
+    // Mapper that accumulates the probability distributed to dangling vertices
+    public static class DanglingVerticesProbabilityAcculatorMapper
+            extends Mapper<Object, Text, Text, Text> {
+
+        @Override
+        protected void map(Object key, Text value, Context context) throws IOException, InterruptedException {
+            Vertex vertex = new Vertex(value.toString());
+            int vertexId = Integer.parseInt(vertex.id);
+
+            boolean isDanglingVertex = (vertexId % k) == 0;
+            if (isDanglingVertex) {
+                // Since counter's type is long, multiple the page rank by max value to preserve precision
+                context.getCounter(DANGLING_VERTICES_PROBABILITY_DISTRIBUTION.DANGLING_VERTICES_PROBABILITY_ACCUMULATOR)
+                        .increment((long) (vertex.pageRankValue * Long.MAX_VALUE));
+            }
+        }
+    }
+
+    public static class PageRankCalculatorMapper extends Mapper<Object, Text, Text, Text> {
+        @Override
+        protected void map(Object key, Text value, Context context) throws IOException, InterruptedException {
+            Vertex vertex = new Vertex(value.toString());
+            // Emit vertex graph structure
+            context.write(new Text(vertex.id), new Text(value));
+            if (vertex.adjacencyList != null) {
+                for (String neighborVertexId : vertex.adjacencyList) {
+                    // value begins with 'val=' to differentiate vertex graph structure and page rank value
+                    context.write(new Text(neighborVertexId), new Text("val=" + vertex.pageRankValue));
+                }
+            }
+        }
+    }
+
+    public static class PageRankCalculatorReducer extends Reducer<Text, Text, Text, Text> {
+        private static double probabilityFromDanglingNodesPerVertex;
+        private static int totalVertices;
+
+        @Override
+        protected void setup(Context context) throws IOException, InterruptedException {
+            double probabilityFromDanglingVertices =
+                    Double.parseDouble(context.getConfiguration().get("PROBABILITY_FROM_DANGLING_VERTICES"));
+
+            totalVertices = k * k;
+            probabilityFromDanglingNodesPerVertex = probabilityFromDanglingVertices / totalVertices;
+        }
+
+        @Override
+        protected void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
+            Vertex vertex = null;
+            double pageRankSumFromIncomingEdges = 0.0;
+            for (Text valueText : values) {
+                String value = valueText.toString();
+                if (value.startsWith("val=")) {
+                    // page rank value
+                    pageRankSumFromIncomingEdges += Double.parseDouble(value);
+
+                } else {
+                    // vertex graph structure
+                    vertex = new Vertex(value);
+                }
+            }
+
+            if (vertex == null)
+                return;
+
+            double randomSurferProbability = alpha * (1.0 / totalVertices);
+            double pageRankProbability = (1 - alpha) *
+                    (probabilityFromDanglingNodesPerVertex + pageRankSumFromIncomingEdges);
+
+            double newPageRankValue = randomSurferProbability + pageRankProbability;
+            vertex.pageRankValue = newPageRankValue;
+
+            context.write(new Text(vertex.id), new Text(vertex.toString()));
+        }
+    }
+
     @Override
-    public int run(String[] strings) throws Exception {
+    public int run(String[] args) throws Exception {
+        String inputPath;
+        String outputPath;
+        for (int i = 1; i <= 3; i++) {
+            inputPath = (i % 2 == 1) ? args[0] : args[1];
+            outputPath = (i % 2 == 0) ? args[1] : args[0];
+
+            logger.info("Iteration:" + i);
+            final Configuration conf = getConf();
+            final Job job1 = Job.getInstance(conf, "Dangling vertices page rank accumulator");
+
+            job1.setJarByClass(PageRankHadoop.class);
+
+            final Configuration jobConf = job1.getConfiguration();
+            jobConf.set("mapreduce.output.textoutputformat.separator", ":");
+
+            job1.setJarByClass(PageRankHadoop.class);
+            job1.setMapperClass(DanglingVerticesProbabilityAcculatorMapper.class);
+
+            //job.setCombinerClass(PRReducer.class);
+            job1.setOutputKeyClass(Text.class);
+            job1.setOutputValueClass(Text.class);
+            FileInputFormat.addInputPath(job1, new Path(inputPath));
+            FileOutputFormat.setOutputPath(job1, new Path("/temp"));
+
+            if (!job1.waitForCompletion(true))
+                System.exit(1);
+
+            Counters cn = job1.getCounters();
+            long counterValue =
+                    cn.findCounter(DANGLING_VERTICES_PROBABILITY_DISTRIBUTION.DANGLING_VERTICES_PROBABILITY_ACCUMULATOR).getValue();
+
+            double totalPageRankFromDanglingVerices = (double) counterValue / Long.MAX_VALUE;
+            conf.setDouble("PROBABILITY_FROM_DANGLING_VERTICES", totalPageRankFromDanglingVerices);
+            logger.log(Level.INFO, "totalPageRankFromDanglingVerices: " + totalPageRankFromDanglingVerices);
+
+            FileSystem fs = FileSystem.get(conf);
+
+            fs.delete(new Path("/temp"), true);
+
+            final Job job2 = Job.getInstance(conf, "Rage rank calculator");
+
+            System.out.println("Executing job 2");
+
+            job2.setJarByClass(PageRankHadoop.class);
+            job2.setMapperClass(PageRankCalculatorMapper.class);
+            job2.setReducerClass(PageRankCalculatorReducer.class);
+
+            job2.setOutputKeyClass(Text.class);
+            job2.setOutputValueClass(Text.class);
+
+            FileInputFormat.addInputPath(job2, new Path(inputPath));
+            FileOutputFormat.setOutputPath(job2, new Path(outputPath));
+
+            if (!job2.waitForCompletion(true))
+                System.exit(1);
+
+            fs.delete(new Path(inputPath), true);
+        }
+
         return 0;
     }
 
