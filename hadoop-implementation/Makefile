@@ -3,9 +3,9 @@
 # Customize these paths for your environment.
 # -----------------------------------------------------------
 hadoop.root=/Users/gowthamgenupur/Documents/hadoop/hadoop-2.10.0
-jar.name=reduce-side-join-1.0.jar
+jar.name=page-rank-calculator-1.0.jar
 jar.path=target/${jar.name}
-job.name=twitter.followers.ReduceSideJoinFollowerTriangles
+job.name=pagerank.PageRankHadoop
 # job.name=twitter.followers.JoinAnalysis
 local.input=input
 local.output=output

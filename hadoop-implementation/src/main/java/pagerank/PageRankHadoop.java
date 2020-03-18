@@ -10,7 +10,7 @@ import org.apache.hadoop.util.ToolRunner;
 import org.apache.log4j.Level;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
-import twitter.followers.ReduceSideJoinFollowerTriangles;
+
 import org.apache.hadoop.mapreduce.*;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.FileSystem;
@@ -21,11 +21,12 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 public class PageRankHadoop extends Configured implements Tool {
     private static final Logger logger = LogManager.getLogger(PageRankHadoop.class);
-    private static final int k = 3;
-    private static final double alpha = 0.15;
+    private static final int K = 3;
+    private static final double ALPHA = 0.15;
 
     enum DANGLING_VERTICES_PROBABILITY_DISTRIBUTION {
         DANGLING_VERTICES_PROBABILITY_ACCUMULATOR;
@@ -34,7 +35,7 @@ public class PageRankHadoop extends Configured implements Tool {
     private static class Vertex {
         private double pageRankValue;
         private String id;
-        private ArrayList<String> adjacencyList;
+        private List<String> adjacencyList;
 
         // Assigns the values from the serialized string
         Vertex(String serializedValue) {
@@ -66,16 +67,16 @@ public class PageRankHadoop extends Configured implements Tool {
                 }
 
                 stringBuilder.deleteCharAt(stringBuilder.length() - 1);
-                stringBuilder.append(":");
             }
 
+            stringBuilder.append(":");
             stringBuilder.append(this.pageRankValue);
             return stringBuilder.toString(); // vertex 1 connected to 2 and 3 with PR value 0.5 -> 1:2,3:0.3
         }
     }
 
     // Mapper that accumulates the probability distributed to dangling vertices
-    public static class DanglingVerticesProbabilityAcculatorMapper
+    public static class DanglingVerticesProbabilityAccumulatorMapper
             extends Mapper<Object, Text, Text, Text> {
 
         @Override
@@ -83,7 +84,7 @@ public class PageRankHadoop extends Configured implements Tool {
             Vertex vertex = new Vertex(value.toString());
             int vertexId = Integer.parseInt(vertex.id);
 
-            boolean isDanglingVertex = (vertexId % k) == 0;
+            boolean isDanglingVertex = (vertexId % K) == 0;
             if (isDanglingVertex) {
                 // Since counter's type is long, multiple the page rank by max value to preserve precision
                 context.getCounter(DANGLING_VERTICES_PROBABILITY_DISTRIBUTION.DANGLING_VERTICES_PROBABILITY_ACCUMULATOR)
@@ -116,7 +117,7 @@ public class PageRankHadoop extends Configured implements Tool {
             double probabilityFromDanglingVertices =
                     Double.parseDouble(context.getConfiguration().get("PROBABILITY_FROM_DANGLING_VERTICES"));
 
-            totalVertices = k * k;
+            totalVertices = K * K;
             probabilityFromDanglingNodesPerVertex = probabilityFromDanglingVertices / totalVertices;
         }
 
@@ -128,7 +129,8 @@ public class PageRankHadoop extends Configured implements Tool {
                 String value = valueText.toString();
                 if (value.startsWith("val=")) {
                     // page rank value
-                    pageRankSumFromIncomingEdges += Double.parseDouble(value);
+                    String pageRank = value.substring(4);
+                    pageRankSumFromIncomingEdges += Double.parseDouble(pageRank);
 
                 } else {
                     // vertex graph structure
@@ -139,14 +141,22 @@ public class PageRankHadoop extends Configured implements Tool {
             if (vertex == null)
                 return;
 
-            double randomSurferProbability = alpha * (1.0 / totalVertices);
-            double pageRankProbability = (1 - alpha) *
+            double randomSurferProbability = ALPHA * (1.0 / totalVertices);
+            double pageRankProbability = (1 - ALPHA) *
                     (probabilityFromDanglingNodesPerVertex + pageRankSumFromIncomingEdges);
 
-            double newPageRankValue = randomSurferProbability + pageRankProbability;
-            vertex.pageRankValue = newPageRankValue;
+            vertex.pageRankValue = randomSurferProbability + pageRankProbability;
+            StringBuilder stringBuilder = new StringBuilder();
+            if (vertex.adjacencyList != null && !vertex.adjacencyList.isEmpty()) {
+                for (String vertexId : vertex.adjacencyList) {
+                    stringBuilder.append(vertexId);
+                    stringBuilder.append(",");
+                }
 
-            context.write(new Text(vertex.id), new Text(vertex.toString()));
+                stringBuilder.deleteCharAt(stringBuilder.length() - 1);
+            }
+
+            context.write(new Text(vertex.id), new Text(stringBuilder.toString() + ":" + vertex.pageRankValue));
         }
     }
 
@@ -154,9 +164,9 @@ public class PageRankHadoop extends Configured implements Tool {
     public int run(String[] args) throws Exception {
         String inputPath;
         String outputPath;
-        for (int i = 1; i <= 3; i++) {
+        for (int i = 1; i <= 1; i++) {
             inputPath = (i % 2 == 1) ? args[0] : args[1];
-            outputPath = (i % 2 == 0) ? args[1] : args[0];
+            outputPath = (i % 2 == 1) ? args[1] : args[0];
 
             logger.info("Iteration:" + i);
             final Configuration conf = getConf();
@@ -168,13 +178,13 @@ public class PageRankHadoop extends Configured implements Tool {
             jobConf.set("mapreduce.output.textoutputformat.separator", ":");
 
             job1.setJarByClass(PageRankHadoop.class);
-            job1.setMapperClass(DanglingVerticesProbabilityAcculatorMapper.class);
+            job1.setMapperClass(DanglingVerticesProbabilityAccumulatorMapper.class);
 
             //job.setCombinerClass(PRReducer.class);
             job1.setOutputKeyClass(Text.class);
             job1.setOutputValueClass(Text.class);
             FileInputFormat.addInputPath(job1, new Path(inputPath));
-            FileOutputFormat.setOutputPath(job1, new Path("/temp"));
+            FileOutputFormat.setOutputPath(job1, new Path("/temporary"));
 
             if (!job1.waitForCompletion(true))
                 System.exit(1);
@@ -183,15 +193,17 @@ public class PageRankHadoop extends Configured implements Tool {
             long counterValue =
                     cn.findCounter(DANGLING_VERTICES_PROBABILITY_DISTRIBUTION.DANGLING_VERTICES_PROBABILITY_ACCUMULATOR).getValue();
 
-            double totalPageRankFromDanglingVerices = (double) counterValue / Long.MAX_VALUE;
-            conf.setDouble("PROBABILITY_FROM_DANGLING_VERTICES", totalPageRankFromDanglingVerices);
-            logger.log(Level.INFO, "totalPageRankFromDanglingVerices: " + totalPageRankFromDanglingVerices);
+            double totalPageRankFromDanglingVertices = (double) counterValue / Long.MAX_VALUE;
+            conf.setDouble("PROBABILITY_FROM_DANGLING_VERTICES", totalPageRankFromDanglingVertices);
+            logger.log(Level.INFO, "totalPageRankFromDanglingVertices: " + totalPageRankFromDanglingVertices);
 
             FileSystem fs = FileSystem.get(conf);
 
-            fs.delete(new Path("/temp"), true);
+            fs.delete(new Path("/temporary"), true);
 
             final Job job2 = Job.getInstance(conf, "Rage rank calculator");
+            final Configuration jobConf2 = job2.getConfiguration();
+            jobConf2.set("mapreduce.output.textoutputformat.separator", ":");
 
             System.out.println("Executing job 2");
 
@@ -208,7 +220,7 @@ public class PageRankHadoop extends Configured implements Tool {
             if (!job2.waitForCompletion(true))
                 System.exit(1);
 
-            fs.delete(new Path(inputPath), true);
+//            fs.delete(new Path(inputPath), true);
         }
 
         return 0;
@@ -220,8 +232,8 @@ public class PageRankHadoop extends Configured implements Tool {
         }
 
         try {
-            ToolRunner.run(new ReduceSideJoinFollowerTriangles(), args);
-            System.exit(0);
+            ToolRunner.run(new PageRankHadoop(), args);
+//            System.exit(0);
         } catch (final Exception e) {
             logger.error("", e);
         }
