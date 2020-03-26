@@ -164,7 +164,7 @@ public class PageRankHadoop extends Configured implements Tool {
     public int run(String[] args) throws Exception {
         String inputPath;
         String outputPath;
-        for (int i = 1; i <= 1; i++) {
+        for (int i = 1; i <= 10; i++) {
             inputPath = (i % 2 == 1) ? args[0] : args[1];
             outputPath = (i % 2 == 1) ? args[1] : args[0];
 
@@ -184,7 +184,7 @@ public class PageRankHadoop extends Configured implements Tool {
             job1.setOutputKeyClass(Text.class);
             job1.setOutputValueClass(Text.class);
             FileInputFormat.addInputPath(job1, new Path(inputPath));
-            FileOutputFormat.setOutputPath(job1, new Path("/temporary"));
+            FileOutputFormat.setOutputPath(job1, new Path("dummy"));
 
             if (!job1.waitForCompletion(true))
                 System.exit(1);
@@ -199,7 +199,7 @@ public class PageRankHadoop extends Configured implements Tool {
 
             FileSystem fs = FileSystem.get(conf);
 
-            fs.delete(new Path("/temporary"), true);
+            fs.delete(new Path("dummy"), true);
 
             final Job job2 = Job.getInstance(conf, "Rage rank calculator");
             final Configuration jobConf2 = job2.getConfiguration();
@@ -220,7 +220,7 @@ public class PageRankHadoop extends Configured implements Tool {
             if (!job2.waitForCompletion(true))
                 System.exit(1);
 
-//            fs.delete(new Path(inputPath), true);
+            fs.delete(new Path(inputPath), true);
         }
 
         return 0;
