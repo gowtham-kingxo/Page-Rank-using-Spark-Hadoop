@@ -11,7 +11,7 @@ local.input=input
 local.output=output
 # Pseudo-Cluster Execution
 hdfs.user.name=joe
-hdfs.input=/input
+hdfs.input=input
 hdfs.output=output
 # AWS EMR Execution
 aws.emr.release=emr-5.17.0
