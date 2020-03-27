@@ -5,6 +5,7 @@ import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.NLineInputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.log4j.Level;
@@ -25,7 +26,7 @@ import java.util.List;
 
 public class PageRankHadoop extends Configured implements Tool {
     private static final Logger logger = LogManager.getLogger(PageRankHadoop.class);
-    private static final int K = 3;
+    private static final int K = 1000;
     private static final double ALPHA = 0.15;
 
     enum DANGLING_VERTICES_PROBABILITY_DISTRIBUTION {
@@ -162,11 +163,21 @@ public class PageRankHadoop extends Configured implements Tool {
 
     @Override
     public int run(String[] args) throws Exception {
-        String inputPath;
-        String outputPath;
+        String tempInputPath;
+        String tempOutputPath;
         for (int i = 1; i <= 10; i++) {
-            inputPath = (i % 2 == 1) ? args[0] : args[1];
-            outputPath = (i % 2 == 1) ? args[1] : args[0];
+            if (i == 1) {
+                tempInputPath = args[0];
+                tempOutputPath = "tempFolder2";
+
+            } else if (i == 10) {
+                tempInputPath = "tempFolder2";
+                tempOutputPath = args[1];
+
+            } else {
+                tempInputPath = (i % 2 == 1) ? "tempFolder1" : "tempFolder2";
+                tempOutputPath = (i % 2 == 1) ? "tempFolder2" : "tempFolder1";
+            }
 
             logger.info("Iteration:" + i);
             final Configuration conf = getConf();
@@ -178,13 +189,15 @@ public class PageRankHadoop extends Configured implements Tool {
             jobConf.set("mapreduce.output.textoutputformat.separator", ":");
 
             job1.setJarByClass(PageRankHadoop.class);
+            job1.setInputFormatClass(NLineInputFormat.class);
+
             job1.setMapperClass(DanglingVerticesProbabilityAccumulatorMapper.class);
 
-            //job.setCombinerClass(PRReducer.class);
             job1.setOutputKeyClass(Text.class);
             job1.setOutputValueClass(Text.class);
-            FileInputFormat.addInputPath(job1, new Path(inputPath));
-            FileOutputFormat.setOutputPath(job1, new Path("dummy"));
+            FileInputFormat.addInputPath(job1, new Path(tempInputPath));
+            job1.getConfiguration().setInt("mapreduce.input.lineinputformat.linespermap",40000);
+            FileOutputFormat.setOutputPath(job1, new Path("temporary"));
 
             if (!job1.waitForCompletion(true))
                 System.exit(1);
@@ -199,7 +212,7 @@ public class PageRankHadoop extends Configured implements Tool {
 
             FileSystem fs = FileSystem.get(conf);
 
-            fs.delete(new Path("dummy"), true);
+            fs.delete(new Path("temporary"), true);
 
             final Job job2 = Job.getInstance(conf, "Rage rank calculator");
             final Configuration jobConf2 = job2.getConfiguration();
@@ -208,19 +221,25 @@ public class PageRankHadoop extends Configured implements Tool {
             System.out.println("Executing job 2");
 
             job2.setJarByClass(PageRankHadoop.class);
+            job2.setInputFormatClass(NLineInputFormat.class);
+
             job2.setMapperClass(PageRankCalculatorMapper.class);
             job2.setReducerClass(PageRankCalculatorReducer.class);
 
             job2.setOutputKeyClass(Text.class);
             job2.setOutputValueClass(Text.class);
 
-            FileInputFormat.addInputPath(job2, new Path(inputPath));
-            FileOutputFormat.setOutputPath(job2, new Path(outputPath));
+            FileInputFormat.addInputPath(job2, new Path(tempInputPath));
+            job2.getConfiguration().setInt("mapreduce.input.lineinputformat.linespermap",40000);
+
+            FileOutputFormat.setOutputPath(job2, new Path(tempOutputPath));
 
             if (!job2.waitForCompletion(true))
                 System.exit(1);
 
-            fs.delete(new Path(inputPath), true);
+            if (i != 1) {
+                fs.delete(new Path(tempInputPath), true);
+            }
         }
 
         return 0;

@@ -33,7 +33,7 @@ object PageRankScala {
       graph = graph :+ (vertexIdEnd, 0)
     }
 
-    val graphRDD = sc.parallelize(graph.toSeq).cache()
+    val graphRDD = sc.parallelize(graph.toSeq)
 
     val noIncomingEdgeVerticesRDD = sc.parallelize(noIncomingEdgeVertices.toSeq).cache()
 
@@ -50,11 +50,11 @@ object PageRankScala {
 
     var ranksRDD = sc.parallelize(ranks.toSeq)
 
-    var ranksRDD1 = ranksRDD
     for (i <- 1 to 10) {
       val joinedData = graphRDD.join(ranksRDD)
       val joinedRowValues = joinedData.map(row => row._2)
 
+      // Accumulates page rank values for a vertex through incoming edges
       ranksRDD = joinedRowValues.reduceByKey(_ + _)
       ranksRDD = ranksRDD.union(noIncomingEdgeVerticesRDD)
 
@@ -71,6 +71,8 @@ object PageRankScala {
           case _ => {
             // Page rank formula: p' = α * 1/|G| + (1 − α) * (m /|G| + p)
             val randomSurferProbability: Double = alpha * (1.0 / totalVertices)
+            // Since the synthetic graph at max has one incoming edges (other than dummy node)
+            // use the page rank value directly after join
             val pageRankProbability: Double = (1 - alpha) * (pageRankValue + probabilityFromDanglingNodesPerVertex)
 
             val newPageRankValue: Double = randomSurferProbability + pageRankProbability
@@ -81,12 +83,14 @@ object PageRankScala {
             (vertexId, newPageRankValue)
           }
         }
-      }).cache()
+      })
     }
 
 
-    println("DebugString: " + ranksRDD.toDebugString)
-    ranksRDD.collect().foreach(x => println(x))
+//    println("DebugString: " + ranksRDD.toDebugString)
+//    ranksRDD.collect().foreach(x => println(x))
+//    val filteredRDD = ranksRDD.filter(row => row._1 <= 100)
+    ranksRDD.coalesce(1, true).saveAsTextFile("output")
     val sumProbability = ranksRDD.map(_._2).sum()
     println("Sum: " + sumProbability)
   }
